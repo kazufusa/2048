@@ -1,3 +1,6 @@
+var Grid = require("./grid.js");
+var Tile = require("./tile.js");
+var Board = require("montecalro2048").Board;
 function GameManager(size, InputManager, Actuator, StorageManager) {
   this.size           = size; // Size of the grid
   this.inputManager   = new InputManager;
@@ -6,24 +9,47 @@ function GameManager(size, InputManager, Actuator, StorageManager) {
 
   this.startTiles     = 2;
 
-  this.inputManager.on("move", this.move.bind(this));
+  // this.inputManager.on("move", this.move.bind(this));
   this.inputManager.on("restart", this.restart.bind(this));
   this.inputManager.on("keepPlaying", this.keepPlaying.bind(this));
 
   this.setup();
+  var self = this;
+
+  setTimeout(function(){
+    self.running = true;
+    self.run();
+  }, 2000);
 }
 
 // Restart the game
 GameManager.prototype.restart = function () {
-  this.storageManager.clearGameState();
-  this.actuator.continueGame(); // Clear the game won/lost message
-  this.setup();
+  this.running = false;
+  var self = this;
+
+  setTimeout(function(){
+    self.storageManager.clearGameState();
+    self.actuator.continueGame(); // Clear the game won/lost message
+    self.setup();
+  }, 500);
+
+  setTimeout(function(){
+    self.running = true;
+    self.run();
+  }, 2000);
 };
 
 // Keep playing after winning (allows going over 2048)
 GameManager.prototype.keepPlaying = function () {
   this.keepPlaying = true;
   this.actuator.continueGame(); // Clear the game won/lost message
+
+  this.running = false;
+  var self = this;
+  setTimeout(function(){
+    self.running = true;
+    self.run();
+  }, 1000);
 };
 
 // Return true if the game is lost, or has won and the user hasn't kept playing
@@ -43,12 +69,16 @@ GameManager.prototype.setup = function () {
     this.over        = previousState.over;
     this.won         = previousState.won;
     this.keepPlaying = previousState.keepPlaying;
+    this.running     = false;
+    this.rundelay    = 600;
   } else {
     this.grid        = new Grid(this.size);
     this.score       = 0;
     this.over        = false;
     this.won         = false;
     this.keepPlaying = false;
+    this.running     = false;
+    this.rundelay    = 600;
 
     // Add the initial tiles
     this.addStartTiles();
@@ -167,7 +197,10 @@ GameManager.prototype.move = function (direction) {
           self.score += merged.value;
 
           // The mighty 2048 tile
-          if (merged.value === 2048) self.won = true;
+          if (merged.value === 2048) {
+            self.won = true;
+            if (!self.keepPlaying) self.running = false;
+          }
         } else {
           self.moveTile(tile, positions.farthest);
         }
@@ -184,6 +217,7 @@ GameManager.prototype.move = function (direction) {
 
     if (!this.movesAvailable()) {
       this.over = true; // Game over!
+      this.running = false;
     }
 
     this.actuate();
@@ -270,3 +304,39 @@ GameManager.prototype.tileMatchesAvailable = function () {
 GameManager.prototype.positionsEqual = function (first, second) {
   return first.x === second.x && first.y === second.y;
 };
+
+// moves continuously until game is over
+GameManager.prototype.run = function() {
+  var position = [];
+  for (var i = 0; i < this.grid.cells[0].length; ++i) {
+    position[i] = [];
+    for (var j = 0; j < this.grid.cells.length; ++j) {
+      position[i][j] = this.grid.cells[j][i] ? this.grid.cells[j][i].value : 0;
+    }
+  }
+  var board = new Board(position, {depth: 20, sampling:3000});
+  var points = [0, 0, 0, 0];
+  var p, estimate, i;
+  for (i = 0; i < 33; ++i) {
+    board.depth = 20 + i / 3;
+    estimate = board.estimate();
+    for (var k = 0; k < 4; ++k) {
+      points[k] += estimate.evaluations[k];
+    }
+    p = Math.max.apply(null, points);
+    if (p > 5000) break;
+  }
+  // console.log(i, points);
+  this.move(points.indexOf(p));
+
+  if (this.running && !this.over) {
+    var self = this;
+    setTimeout(function(){
+      self.run();
+    }, self.rundelay);
+  } else {
+    this.running = false;
+  };
+};
+
+module.exports = GameManager;
